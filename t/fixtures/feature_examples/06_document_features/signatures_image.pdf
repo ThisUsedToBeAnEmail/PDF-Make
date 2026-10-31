@@ -1,0 +1,71 @@
+%PDF-2.0
+%‚„œ”
+1 0 obj
+<</Type /Font/Subtype /Type1/BaseFont /Helvetica>>
+endobj
+2 0 obj
+<</Type /Font/Subtype /Type1/BaseFont /Helvetica>>
+endobj
+3 0 obj
+<</Length 581>>
+stream
+BT
+0 0 0 rg
+/F_Helvetica_normal 50 Tf
+1 0 0 1 20 722 Tm
+(Image-Based Visible) Tj
+ET
+BT
+0 0 0 rg
+/F_Helvetica_normal 50 Tf
+1 0 0 1 20 652 Tm
+(Signature) Tj
+ET
+BT
+0 0 0 rg
+/F_Helvetica_normal 9 Tf
+1 0 0 1 20 618 Tm
+(This document is digitally signed.) Tj
+ET
+BT
+0 0 0 rg
+/F_Helvetica_normal 9 Tf
+1 0 0 1 20 604 Tm
+(The visible widget on page 1 embeds a PNG of the signer's scribbled signature.) Tj
+ET
+BT
+0 0 0 rg
+/F_Helvetica_normal 9 Tf
+1 0 0 1 20 590 Tm
+(Certificate load failed: Cannot read PKCS#12 file: corpus/fixtures/test_cert.p12 at lib/PDF/Make/Signature.pm line 139.) Tj
+ET
+
+endstream
+endobj
+4 0 obj
+<</Type /Pages/Kids [5 0 R]/Count 1>>
+endobj
+5 0 obj
+<</Type /Page/Parent 4 0 R/MediaBox [0 0 612 792]/Resources <</Font <</F_Helvetica_normal 2 0 R>>>>/Contents 3 0 R>>
+endobj
+6 0 obj
+<</Type /Catalog/Pages 4 0 R>>
+endobj
+7 0 obj
+<</Producer (PDF-Make/0.13)/CreationDate (D:20261005214532Z)/ModDate (D:20261005214532Z)>>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000081 00000 n 
+0000000147 00000 n 
+0000000777 00000 n 
+0000000830 00000 n 
+0000000962 00000 n 
+0000001008 00000 n 
+trailer
+<</Size 8/Root 6 0 R/Info 7 0 R/ID[<46E84C4F302D39A4259E5D4427663E85><46E84C4F302D39A4259E5D4427663E85>]>>
+startxref
+1114
+%%EOF

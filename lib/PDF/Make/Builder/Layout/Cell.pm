@@ -1,0 +1,301 @@
+package PDF::Make::Builder::Layout::Cell;
+use strict;
+use warnings;
+use overload '%{}' => '_as_hashref', fallback => 1;
+use Object::Proto;
+use PDF::Make::Builder::Font;
+use PDF::Make::Builder::Runs;
+
+BEGIN {
+    Object::Proto::define('PDF::Make::Builder::Layout::Cell',
+        'row',
+        'weight:Num:default(1)',
+        'align:Str:default(left)',
+        'valign:Str:default(top)',
+        'pad:Num:default(5)',
+        'bg:Str',
+        'border:Str',
+        'text_border:Str',
+        'text_border_width:Num:default(0.5)',
+        'wrap_slack:Num:default(0)',
+        'content:ArrayRef:default([])',
+    );
+    Object::Proto::import_accessors('PDF::Make::Builder::Layout::Cell');
+}
+
+# A cell item is either a plain string or a list of styled runs. The plain
+# form keeps the original wrapping loop, so documents written before runs
+# existed still produce the same bytes.
+sub text {
+    my ($self, $str, %args) = @_;
+    my $content = content $self;
+    push @$content, { type => "text", text => $str, %args };
+    return $self;
+}
+
+sub runs {
+    my ($self, $runs, %args) = @_;
+    my $content = content $self;
+    my $plain = join "", map { defined $_->{text} ? $_->{text} : "" } @$runs;
+    push @$content, { type => "text", text => $plain, runs => $runs, %args };
+    return $self;
+}
+
+sub image {
+    my ($self, $path, %args) = @_;
+    my $content = content $self;
+    push @$content, { type => 'image', path => $path, %args };
+    return $self;
+}
+
+sub _as_hashref {
+    my ($self) = @_;
+    return {
+        row               => row($self),
+        weight            => weight($self),
+        align             => align($self),
+        valign            => valign($self),
+        pad               => pad($self),
+        bg                => bg($self),
+        border            => border($self),
+        text_border       => text_border($self),
+        text_border_width => text_border_width($self),
+        wrap_slack        => wrap_slack($self),
+        content           => content($self),
+    };
+}
+
+sub _resolve_item_font {
+    my ($self, $base_font, $item) = @_;
+
+    return $base_font
+        if !defined($item->{size})
+        && !defined($item->{family})
+        && !defined($item->{bold})
+        && !defined($item->{italic});
+
+    my %init = (
+        colour      => $item->{colour}      // $base_font->colour,
+        size        => $item->{size}        // $base_font->size,
+        family      => $item->{family}      // $base_font->family,
+        bold        => $item->{bold}        // $base_font->bold,
+        italic      => $item->{italic}      // $base_font->italic,
+        registry    => $base_font->registry,
+    );
+    my $lh = PDF::Make::Builder::Font->resolve_line_height($base_font, $item);
+    $init{line_height} = $lh if defined $lh;
+    return PDF::Make::Builder::Font->new(%init);
+}
+
+sub measure_height {
+    my ($self, $font, $cell_w) = @_;
+    my $h = 0;
+    my $inner_w = $cell_w - 2 * (pad $self);
+    for my $item (@{content $self}) {
+        if ($item->{type} eq 'text') {
+            if ($item->{runs}) {
+                $h += $self->runs_height($font, $item, $inner_w);
+                next;
+            }
+            my $item_font = $self->_resolve_item_font($font, $item);
+            my $sz = $item->{size} // $item_font->size;
+            my $lh = $item->{line_height} // $sz;
+            my $text_w = $item_font->measure_text($item->{text});
+            my $lines = int($text_w / ($inner_w || 1)) + 1;
+            $h += $lines * $lh;
+        } elsif ($item->{type} eq 'image') {
+            $h += $item->{h} // 50;
+        }
+    }
+    return $h;
+}
+
+# Styled runs inside a cell go through the same line breaker Builder::Text
+# uses, so a bold word wraps identically whether it sits in a paragraph or in
+# a table cell. The plain-text loop below is untouched: existing documents
+# depend on those bytes.
+#
+# Height of a run item at a given width: the real line breaking, not an
+# estimate, so a row grows to fit a wrapped bold phrase rather than clipping
+# it.
+sub runs_height {
+    my ($self, $font, $item, $width) = @_;
+    my $rruns = $self->_resolve_runs($font, $item);
+    return 0 unless @$rruns;
+    my $lines = PDF::Make::Builder::Runs->layout(
+        runs  => $rruns,
+        width => ($width && $width > 1 ? $width : 1),
+    );
+    my $sp = item_spacing($item);
+    my $h = 0;
+    $h += $_->{lh} + $sp for @$lines;
+    return $h;
+}
+
+# An item's spacing: extra leading between its wrapped lines and once after
+# it, which is what the same attribute means on a text block outside a cell.
+# One gap per line, so measuring and rendering agree - they have to, or the
+# row is sized for less than it draws and the last line is clipped.
+sub item_spacing {
+    my ($item) = @_;
+    my $sp = $item->{spacing};
+    return 0 if !defined $sp || $sp < 0;
+    return $sp;
+}
+
+sub _render_runs {
+    my ($self, $canvas, $font, $page, $item, $cx, $cy, $cw, $text_y, $align) = @_;
+
+    my $rruns = $self->_resolve_runs($font, $item);
+    return $text_y unless @$rruns;
+
+    my $lines = PDF::Make::Builder::Runs->layout(
+        runs  => $rruns,
+        width => $cw + wrap_slack($self),
+    );
+
+    my $sp = item_spacing($item);
+    my %ensured;
+    for my $line (@$lines) {
+        # The baseline sits one font size below the top of the slot, and the
+        # slot is the line height: text starts at the top of its line-height,
+        # the way Builder::Text places it outside a cell. Drawing at the
+        # bottom instead - which is what subtracting the whole line height
+        # first did - put a line-height:230 heading 230pt down the page.
+        my $baseline = $text_y - $line->{size};
+        last if $baseline < $cy;
+
+        my $tx = $cx;
+        if ($align eq 'center') {
+            $tx = $cx + ($cw - $line->{w}) / 2;
+        } elsif ($align eq 'right') {
+            $tx = $cx + $cw - $line->{w};
+        }
+
+        $canvas->BT;
+        for my $seg (@{ $line->{segs} }) {
+            my $f   = $seg->{font};
+            my $res = $ensured{"$f"} ||= $f->ensure_loaded($page->xs_page);
+            my ($r, $g, $b) = $f->hex_to_rgb($f->colour);
+            my $show = $f->show_op;
+            $canvas->rg($r, $g, $b)
+                   ->Tf($res, $f->size)
+                   ->Tm(1, 0, 0, 1, $tx, $baseline)
+                   ->$show($f->encode($seg->{text}));
+            $tx += $seg->{w};
+        }
+        $canvas->ET;
+        $text_y -= $line->{lh} + $sp;
+    }
+    return $text_y;
+}
+
+# Build the run list for a cell item, resolving each run's overrides against
+# the cell's own font. Identical styles share one font object so that
+# adjacent segments coalesce and single-run text measures as one string.
+sub _resolve_runs {
+    my ($self, $font, $item) = @_;
+    my $base = $self->_resolve_item_font($font, $item);
+    my %cache;
+    my @out;
+
+    for my $run (@{ $item->{runs} }) {
+        next unless defined $run->{text} && length $run->{text};
+        my %spec = (
+            colour      => $run->{colour}      // $base->colour,
+            size        => $run->{size}        // $base->size,
+            family      => $run->{family}      // $base->family,
+            bold        => $run->{bold}        // $base->bold,
+            italic      => $run->{italic}      // $base->italic,
+            registry    => $base->registry,
+        );
+        my $rlh = PDF::Make::Builder::Font->resolve_line_height($base, $run);
+        $spec{line_height} = $rlh if defined $rlh;
+        my $key = join "\0", map { defined $spec{$_} ? $spec{$_} : '' }
+                             qw(colour size family bold italic line_height);
+        $cache{$key} ||= PDF::Make::Builder::Font->new(%spec);
+        push @out, { font => $cache{$key}, text => $run->{text} };
+    }
+    return \@out;
+}
+
+sub render_content {
+    my ($self, $canvas, $font, $page, $cx, $cy, $cw, $ch) = @_;
+
+    if (my $tb = text_border $self) {
+        my ($r, $g, $b) = $font->hex_to_rgb($tb);
+        my $bw = text_border_width $self;
+        $canvas->q->w($bw)->RG($r, $g, $b)->re($cx, $cy, $cw, $ch)->S->Q;
+    }
+
+    my $text_y = $cy + $ch - (pad $self);
+    my $cell_align = align $self;
+
+    for my $item (@{content $self}) {
+        next unless $item->{type} eq q{text};
+
+        # A cell has one alignment, but each item may carry its own - a box
+        # of centred blocks is one cell holding several.
+        my $align = $item->{align} // $cell_align;
+
+        if ($item->{runs}) {
+            $text_y = $self->_render_runs($canvas, $font, $page, $item,
+                                          $cx, $cy, $cw, $text_y, $align);
+            next;
+        }
+
+        my $item_font = $self->_resolve_item_font($font, $item);
+        my $sz = $item->{size} // $item_font->size;
+        my $lh = ($item->{line_height} // $sz) + item_spacing($item);
+        my $colour = $item->{colour} // $item_font->colour;
+        my ($r, $g, $b) = $item_font->hex_to_rgb($colour);
+        my $res = $item_font->ensure_loaded($page->xs_page);
+        my $show = $item_font->show_op;
+
+        my @words = split /\s+/, $item->{text};
+        my $line = '';
+        my $line_w = 0;
+
+        for my $word (@words) {
+            my $candidate = $line eq '' ? $word : ($line . ' ' . $word);
+            my $test = $item_font->measure_text($candidate);
+            my $slack = wrap_slack $self;
+
+            if ($test > $cw + $slack && $line ne '') {
+                my $baseline = $text_y - $sz;
+                last if $baseline < $cy;
+                my $tx = $cx;
+                if ($align eq 'center') {
+                    $tx = $cx + ($cw - $line_w) / 2;
+                } elsif ($align eq 'right') {
+                    $tx = $cx + $cw - $line_w;
+                }
+                $canvas->BT->Tf($res, $sz)->rg($r, $g, $b)
+                    ->Td($tx, $baseline)->$show($item_font->encode($line))->ET;
+                $text_y -= $lh;
+                $line = $word;
+                $line_w = $item_font->measure_text($line);
+            } else {
+                $line = $candidate;
+                $line_w = $test;
+            }
+        }
+
+        if ($line ne '') {
+            my $baseline = $text_y - $sz;
+            if ($baseline >= $cy) {
+                my $tx = $cx;
+                if ($align eq 'center') {
+                    $tx = $cx + ($cw - $line_w) / 2;
+                } elsif ($align eq 'right') {
+                    $tx = $cx + $cw - $line_w;
+                }
+                $canvas->BT->Tf($res, $sz)->rg($r, $g, $b)
+                    ->Td($tx, $baseline)->$show($item_font->encode($line))->ET;
+            }
+            $text_y -= $lh;
+        }
+    }
+}
+
+1;

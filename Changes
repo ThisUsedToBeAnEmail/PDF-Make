@@ -1,0 +1,123 @@
+Revision history for PDF::Make
+
+0.15  2026-10-06
+     - Fix: SOURCE_DATE_EPOCH was ignored on Windows. 
+
+0.14  2026-10-05
+     - Fix: Font rendering incorrect family
+     - Fix: pdfmake_font_write was a stub, a TTF carried no /BaseFont, and
+       pdfmake_page_add_font rejects anything but a Standard 14 name.
+       TrueType fonts now embed as a subsetted /Type0 font with Identity-H
+       encoding, a /CIDToGIDMap stream and a /ToUnicode CMap, and a loaded
+       font is usable as a font family. Reported by ULIBUCK.
+     - Fix: PDF::Make::Font->from_file and from_bytes kept a pointer into a
+       buffer they then released. Every cmap lookup, advance and subset read
+       freed memory; it returned correct answers until the allocator reused
+       the block, then glyph 0 for everything.
+     - Fix: a single-column page with a large heading could be split by a
+       phantom column gutter, reordering and splitting extracted words.
+       A gutter now has to have text on both sides of it on more than one
+       line.
+     - Fix: Make.c did not depend on the xs/*.xs files Make.xs includes, so
+       an edit to an XSUB rebuilt and relinked without taking effect.
+     - New: PDF::Make::Page->add_font_ref, to name an existing font object
+       in a page's resources.
+     - New: PDF::Make::Canvas->Tj_hex, for composite-font glyph strings.
+
+0.13  2026-08-31
+     - Fix: the backward scan for startxref compared the keyword from
+       positions where fewer than nine bytes remained, reading past the end
+       of the file buffer. Harmless slack on most allocators, a SIGSEGV on
+       OpenBSD when the buffer ended on a page boundary.
+     - Fix: the %PDF- version digits are parsed within the buffer, so a file
+       whose digits run to EOF cannot walk off it.
+
+0.12  2026-08-23
+     - Fix: Font::Metrics was used by PDF::Make::Builder::Font but never
+       declared as a prerequisite, so an install that already had an older
+       Layout::Flex never pulled it in. 
+     - Fix: perl 5.10 and 5.12 failed to build. cBOOL is 5.14+ and the
+       call-checker code is compiled on every perl even though the checkers
+       are only registered from 5.14.
+
+0.11  2026-08-17
+     - New: PDF::Make::Markup::Diff - which pages changed between two
+       renders, and what text moved, from structured extraction with
+       positions. 
+     - Fix: blocks inside a <box> flowed onto one line.
+     - Fix: a font size override kept the base font's leading, so a
+       <text size="20"> after a 9pt base got a 9pt slot and the block
+       after it was drawn straight through it. 
+      - Fix: text in a cell now starts at the top of its line height.
+      - New: spacing= works on a block inside a <box>.
+      - t/56-golden-corpus.t is now an author test (AUTHOR_TESTING=1).
+      - Fix: Document::add_outline swallowed every bookmark after the
+	  first.
+
+0.10  2026-08-15
+	- New: PDF::Make::Markup* interface to generate PDFs.
+
+0.09  2026-07-26
+      - Builder::Text: add a "preformatted" option that renders text verbatim,
+        preserving hard newlines and all in line whitespace
+
+0.08  2026-07-21
+      - Builder::Layout::Row::render now uses Layout::Flex for both width
+        distribution and height computation. 
+      - Added examples/02_layout/flex_layout.pl demonstrating auto height,
+        weighted columns, gap, mixed font sizes, and explicit height override.
+
+0.07  2026-07-11
+      - Fix "Free to wrong pool" on Strawberry Perl (Windows): xs/crypt.xs
+        (encrypt_stream, decrypt_stream) and xs/watermark.xs (next_bates,
+        expand) called free() on buffers allocated by C library functions that
+        do not include perl.h.  On Windows, win32/win32.h (pulled in via
+        perl.h in Make.c) redefines free() to win32_free(), which checks that
+        the pointer belongs to Perl's managed pool. Fix: added pdfmake_cfree()
+        in src/pdfmake_crypt.c (no perl.h) and declared it in
+        include/pdfmake_crypt.h. 
+
+0.06  2026-07-07
+      - pdfmake_format_real: replace hand-rolled digit-extraction loop with
+        sprintf("%.6f") + trailing-zero strip.
+      - pdfmake_xs_strndup in Make.xs: add pTHX_ and switch from malloc to
+        Newx / Safefree.  XSUB.h redefines malloc→PerlMem_malloc on Windows
+        PERL_IMPLICIT_SYS builds; without pTHX_ the expansion references
+        my_perl which is undeclared in a plain static function, causing a
+        compile error
+
+0.05  2026-06-29
+      - t/73-watermarks.t: switched the three watermark opacity / colour
+        assertions (default 0.3 opacity, custom [0.8,0.2,0.2] colour,
+        custom 0.2 opacity) from is() / Test2::Bundle::Numerical's default
+        4-ULP relative tolerance to explicit
+        float_is_abs($got, $expected, $name, 1e-12).
+      - Replaced two strndup() calls in xs/signature.xs with a portable
+        pdfmake_xs_strndup() helper defined in Make.xs. 
+
+0.04  2026-06-28
+      - t/73-watermarks.t: switched to Test2::Bundle::Numerical 
+      - Guarded pdfmake_path_t typedef in pdfmake_text.h /
+        pdfmake_render.h with PDFMAKE_PATH_T_DEFINED 
+
+0.03  2026-06-28
+      - typemap: rewrote all 28 INPUT/OUTPUT blocks to avoid an interpolation
+        bug in ExtUtils::ParseXS 3.45+ that silently dropped
+        ${$ALIAS?...:...} expressions, leaving `self` uninitialised and
+        causing SEGVs in 83 of 90 test files on the CPAN Testers grid
+        (perl 5.36 x86_64-linux).
+      - Lowered the supported Perl floor from 5.20 to 5.10.1.
+        MIN_PERL_VERSION 
+      - Added pre-5.22 compatibility shims for the op-tree sibling API
+        (OpSIBLING, OpHAS_SIBLING, OpMORESIB_set, OpLASTSIB_set) 
+      - Added a pre-5.16 fallback for gv_fetchmeth_pvn that delegates to
+        gv_fetchmeth, 
+      - t/73-watermarks.t: switched to Test2::Bundle::Numerical so
+        opacity/colour comparisons pass on perls built with
+        -Duselongdouble / -Dusequadmath.
+
+0.02  2026-06-28
+      Second release — see git log for the feature set introduced.
+
+0.01  2026-06-28
+      First version, released on an unsuspecting world.
